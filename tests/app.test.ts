@@ -149,6 +149,32 @@ test('updates require a modified timestamp and preserve upstream stale-write 409
   assert.equal((await stale.json()).title, 'CONFLICT');
 });
 
+test('a name-only PATCH preserves omitted description, image and product flags', async t => {
+  const existing = { ...PRODUCT, description: 'Keep this description', image: 'https://example.invalid/existing.jpg', disabled: true, isStockItem: false };
+  const { login, request, calls } = await harness(t, { save: input => ({ data: { ...existing, ...input } }) });
+  const session = await login();
+  const patch = { name: 'Renamed only', modified: PRODUCT.modified };
+  const response = await request('/api/v1/products/TEST-1', {
+    method: 'PATCH', headers: mutationHeaders(session.cookie, session.csrf), body: JSON.stringify(patch),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).data, { ...existing, ...patch });
+  assert.deepEqual(calls.find(call => call.method === 'save')?.args[0], patch);
+});
+
+test('creation still applies defaults to omitted optional product fields', async t => {
+  const { login, request, calls } = await harness(t);
+  const session = await login();
+  const input = { code: INPUT.code, name: INPUT.name, group: INPUT.group, uom: INPUT.uom };
+  const response = await request('/api/v1/products', {
+    method: 'POST', headers: mutationHeaders(session.cookie, session.csrf), body: JSON.stringify(input),
+  });
+  assert.equal(response.status, 201);
+  assert.deepEqual(calls.find(call => call.method === 'save')?.args[0], {
+    ...input, description: '', image: null, disabled: false, isStockItem: true,
+  });
+});
+
 test('Frappe record permission refusal stays 403 without escalating to the catalog account', async t => {
   const { login, request, calls } = await harness(t, { list: () => { throw new ApiError(403, 'PERMISSION_DENIED', 'Test permission denied'); } });
   const session = await login();

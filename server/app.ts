@@ -59,19 +59,27 @@ const image = z
     "Görsel HTTPS adresi veya herkese açık dosya yolu olmalı.",
   )
   .nullable();
+const productFields = {
+  code: z.string().trim().min(1).max(140),
+  name: z.string().trim().min(1).max(140),
+  description: z.string().max(20000),
+  group: z.string().trim().min(1).max(140),
+  uom: z.string().trim().min(1).max(140),
+  image,
+  disabled: z.boolean(),
+  isStockItem: z.boolean(),
+};
 const productSchema = z
   .object({
-    code: z.string().trim().min(1).max(140),
-    name: z.string().trim().min(1).max(140),
-    description: z.string().max(20000).default(""),
-    group: z.string().trim().min(1).max(140),
-    uom: z.string().trim().min(1).max(140),
-    image: image.default(null),
-    disabled: z.boolean().default(false),
-    isStockItem: z.boolean().default(true),
+    ...productFields,
+    description: productFields.description.default(""),
+    image: productFields.image.default(null),
+    disabled: productFields.disabled.default(false),
+    isStockItem: productFields.isStockItem.default(true),
   })
   .strict();
-const updateSchema = productSchema
+const updateSchema = z
+  .object(productFields)
   .partial()
   .extend({ modified: z.string().min(1).max(80) })
   .strict();

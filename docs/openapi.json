@@ -2,15 +2,23 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Metaframer headless API",
-    "version": "1.0.0",
-    "description": "ERPNext is the source of truth. No mock fallback. Catalog endpoints require server credentials and publish only configured leaf Item Group."
+    "version": "1.1.0",
+    "description": "ERPNext is the source of truth; no mock fallback. Static admin/storefront frontends run on GitHub Pages and call the API-only server. AUTH_MODE=bearer uses an encrypted opaque 8-hour admin session; cookie mode remains the local default. Anonymous public catalog routes expose only enabled sales Items in the configured leaf Item Group. Internal catalog routes still require a separate server secret. Non-allowlisted browser Origins are rejected."
   },
   "servers": [
     {
-      "url": "http://localhost:4300"
+      "url": "https://headless-api.metaframer.net",
+      "description": "API-only production server; frontends are on https://metafrappe.github.io"
+    },
+    {
+      "url": "http://localhost:4300",
+      "description": "Local development; cookie authentication by default"
     }
   ],
   "security": [
+    {
+      "AdminBearer": []
+    },
     {
       "AdminSession": []
     }
@@ -28,7 +36,8 @@
             "schema": {
               "type": "string",
               "format": "uri"
-            }
+            },
+            "description": "Must exactly match APP_ORIGIN or ALLOWED_ORIGINS; the browser sets this automatically. Pages Origin is https://metafrappe.github.io, without repository path."
           }
         ],
         "requestBody": {
@@ -44,12 +53,16 @@
                 ],
                 "properties": {
                   "username": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 320
                   },
                   "password": {
                     "type": "string",
                     "format": "password",
-                    "writeOnly": true
+                    "writeOnly": true,
+                    "minLength": 1,
+                    "maxLength": 1024
                   }
                 }
               }
@@ -62,100 +75,76 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "$ref": "#/components/schemas/LoginResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
               }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "description": "Requires an exact allowlisted browser Origin. No local CSRF is required at login. Bearer mode returns accessToken without Set-Cookie; cookie mode returns Session plus encrypted HttpOnly cookie."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
@@ -172,104 +161,77 @@
                   "$ref": "#/components/schemas/Session"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "description": "Validates upstream identity on every request; returns user and local csrfToken, not a replacement accessToken."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
     },
     "/api/v1/auth/logout": {
       "post": {
-        "summary": "Invalidate Frappe session and local cookie",
+        "summary": "Invalidate the upstream Frappe session",
         "parameters": [
           {
             "name": "Origin",
@@ -278,7 +240,8 @@
             "schema": {
               "type": "string",
               "format": "uri"
-            }
+            },
+            "description": "Must exactly match APP_ORIGIN or ALLOWED_ORIGINS; the browser sets this automatically. Pages Origin is https://metafrappe.github.io, without repository path."
           },
           {
             "name": "X-CSRF-Token",
@@ -286,102 +249,79 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Local csrfToken returned by login/session; not the upstream Frappe CSRF token."
           }
         ],
         "responses": {
           "204": {
-            "description": "Logged out"
+            "description": "Logged out",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "description": "204 confirms upstream logout succeeded. Cookie mode also clears its cookie. A failed upstream logout returns an error: clearing a local bearer token alone does not revoke a copied stateless token."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
@@ -462,99 +402,48 @@
                   "$ref": "#/components/schemas/ProductList"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
           }
-        }
+        },
+        "description": " Query parameters are allowlisted; unknown parameters return 422."
       },
       "post": {
         "summary": "Create ERPNext Item",
@@ -566,7 +455,8 @@
             "schema": {
               "type": "string",
               "format": "uri"
-            }
+            },
+            "description": "Must exactly match APP_ORIGIN or ALLOWED_ORIGINS; the browser sets this automatically. Pages Origin is https://metafrappe.github.io, without repository path."
           },
           {
             "name": "X-CSRF-Token",
@@ -574,7 +464,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Local csrfToken returned by login/session; not the upstream Frappe CSRF token."
           }
         ],
         "requestBody": {
@@ -596,97 +487,72 @@
                   "$ref": "#/components/schemas/ProductResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        }
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
@@ -714,97 +580,45 @@
                   "$ref": "#/components/schemas/ProductDetail"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
           }
         }
       },
@@ -818,7 +632,8 @@
             "schema": {
               "type": "string",
               "format": "uri"
-            }
+            },
+            "description": "Must exactly match APP_ORIGIN or ALLOWED_ORIGINS; the browser sets this automatically. Pages Origin is https://metafrappe.github.io, without repository path."
           },
           {
             "name": "X-CSRF-Token",
@@ -826,7 +641,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Local csrfToken returned by login/session; not the upstream Frappe CSRF token."
           }
         ],
         "requestBody": {
@@ -848,97 +664,48 @@
                   "$ref": "#/components/schemas/ProductResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
           }
         }
       },
@@ -952,7 +719,8 @@
             "schema": {
               "type": "string",
               "format": "uri"
-            }
+            },
+            "description": "Must exactly match APP_ORIGIN or ALLOWED_ORIGINS; the browser sets this automatically. Pages Origin is https://metafrappe.github.io, without repository path."
           },
           {
             "name": "X-CSRF-Token",
@@ -960,102 +728,75 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Local csrfToken returned by login/session; not the upstream Frappe CSRF token."
           }
         ],
         "responses": {
           "204": {
-            "description": "Deleted"
+            "description": "Deleted",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        }
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
@@ -1072,97 +813,69 @@
                   "$ref": "#/components/schemas/Options"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        }
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
@@ -1172,97 +885,77 @@
         "summary": "21 configured application links; only product workflows have headless UI in v1",
         "responses": {
           "200": {
-            "description": "App links"
+            "description": "App links",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Apps"
+                }
+              }
+            }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "description": "Configured links only: no live installation/health status is asserted. Product CRUD is the current headless workflow; other apps open native Frappe screens."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
@@ -1348,97 +1041,70 @@
                   "$ref": "#/components/schemas/ProductList"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "description": "Requires server-to-server CATALOG_SHARED_SECRET. Regardless of caller group/status, visibility is always restricted to enabled sales Items in the configured catalog group. Query parameters are allowlisted; unknown parameters return 422."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
@@ -1471,97 +1137,80 @@
                   "$ref": "#/components/schemas/ProductDetail"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "description": "Requires server-to-server CATALOG_SHARED_SECRET. Regardless of caller group/status, visibility is always restricted to enabled sales Items in the configured catalog group."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ERPNext Item identifier, URL-encoded as one path component.",
+            "schema": {
+              "type": "string",
+              "maxLength": 140
             }
+          },
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
@@ -1574,9 +1223,41 @@
             "name": "id",
             "in": "path",
             "required": true,
+            "description": "ERPNext Item identifier, URL-encoded as one path component.",
             "schema": {
               "type": "string",
               "maxLength": 140
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "default": ""
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 140,
+              "default": ""
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "disabled",
+                "all"
+              ],
+              "default": "all"
             }
           },
           {
@@ -1585,7 +1266,8 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 10000
+              "maximum": 10000,
+              "default": 1
             }
           },
           {
@@ -1594,7 +1276,21 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 50
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "code",
+                "-modified"
+              ],
+              "default": "-modified"
             }
           }
         ],
@@ -1607,97 +1303,80 @@
                   "$ref": "#/components/schemas/ProductList"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "description": " Query parameters are allowlisted; unknown parameters return 422."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ERPNext Item identifier, URL-encoded as one path component.",
+            "schema": {
+              "type": "string",
+              "maxLength": 140
             }
+          },
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
           }
         }
       }
@@ -1710,9 +1389,41 @@
             "name": "id",
             "in": "path",
             "required": true,
+            "description": "ERPNext Item identifier, URL-encoded as one path component.",
             "schema": {
               "type": "string",
               "maxLength": 140
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "default": ""
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 140,
+              "default": ""
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "disabled",
+                "all"
+              ],
+              "default": "all"
             }
           },
           {
@@ -1721,7 +1432,8 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 10000
+              "maximum": 10000,
+              "default": 1
             }
           },
           {
@@ -1730,7 +1442,21 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 50
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "code",
+                "-modified"
+              ],
+              "default": "-modified"
             }
           }
         ],
@@ -1743,104 +1469,539 @@
                   "$ref": "#/components/schemas/ProductList"
                 }
               }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
             }
           },
           "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error401"
           },
           "403": {
-            "description": "Permission or CSRF denied",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error403"
           },
           "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error404"
           },
           "409": {
-            "description": "Duplicate, stale update or linked record",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error409"
           },
           "422": {
-            "description": "Invalid input",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error422"
           },
           "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error429"
           },
           "502": {
-            "description": "Upstream failure",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error502"
           },
           "503": {
-            "description": "Missing configuration",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error503"
           },
           "504": {
-            "description": "Upstream timeout",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
           }
         },
         "security": [
           {
             "CatalogKey": []
           }
-        ]
+        ],
+        "description": "Requires server-to-server CATALOG_SHARED_SECRET. Regardless of caller group/status, visibility is always restricted to enabled sales Items in the configured catalog group. Query parameters are allowlisted; unknown parameters return 422."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ERPNext Item identifier, URL-encoded as one path component.",
+            "schema": {
+              "type": "string",
+              "maxLength": 140
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/api/v1/public/products": {
+      "get": {
+        "summary": "Anonymous scoped catalog products",
+        "security": [],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "default": ""
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 140,
+              "default": ""
+            },
+            "description": "Cannot widen the fixed server catalog group. A different group on the product list returns an empty list."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active"
+              ],
+              "default": "active"
+            },
+            "description": "Only active is accepted; all/disabled return 422."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "code",
+                "-modified"
+              ],
+              "default": "-modified"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductList"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error502"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "description": "No browser cookie, Authorization or shared secret is required. Uses the server-held read token and fixed Item Group; only enabled sales Items are visible. Out-of-scope parent/detail is 404. No public write operations. CORS allows only exact configured Origins; server reads without Origin are allowed. Unknown query fields and excessive pagination are rejected. Query parameters are allowlisted; unknown parameters return 422."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/api/v1/public/products/{id}": {
+      "get": {
+        "summary": "Anonymous visible catalog product with first variant page",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 140
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error502"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "description": "No browser cookie, Authorization or shared secret is required. Uses the server-held read token and fixed Item Group; only enabled sales Items are visible. Out-of-scope parent/detail is 404. No public write operations. CORS allows only exact configured Origins; server reads without Origin are allowed. Unknown query fields and excessive pagination are rejected."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ERPNext Item identifier, URL-encoded as one path component.",
+            "schema": {
+              "type": "string",
+              "maxLength": 140
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/api/v1/public/products/{id}/variants": {
+      "get": {
+        "summary": "Anonymous paginated variants of a visible catalog parent",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ERPNext Item identifier, URL-encoded as one path component.",
+            "schema": {
+              "type": "string",
+              "maxLength": 140
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "default": ""
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 140,
+              "default": ""
+            },
+            "description": "Cannot widen the fixed server catalog group. A different group on the product list returns an empty list."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active"
+              ],
+              "default": "active"
+            },
+            "description": "Only active is accepted; all/disabled return 422."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "code",
+                "-modified"
+              ],
+              "default": "-modified"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of variants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductList"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error502"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error504"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "security": [],
+        "description": "No browser cookie, Authorization or shared secret is required. Uses the server-held read token and fixed Item Group; only enabled sales Items are visible. Out-of-scope parent/detail is 404. No public write operations. CORS allows only exact configured Origins; server reads without Origin are allowed. Unknown query fields and excessive pagination are rejected. Query parameters are allowlisted; unknown parameters return 422."
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ERPNext Item identifier, URL-encoded as one path component.",
+            "schema": {
+              "type": "string",
+              "maxLength": 140
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "summary": "API process and catalog configuration presence",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Process is serving; not an upstream live check",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        }
+      },
+      "options": {
+        "summary": "Exact-origin CORS preflight",
+        "security": [],
+        "description": "204 validates allowed Origin/method/header names only; it does not prove the requested operation exists or authorize it. Missing/unlisted Origin or unlisted method/header returns 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorsOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CorsMethod"
+          },
+          {
+            "$ref": "#/components/parameters/CorsHeaders"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/CorsPreflight"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
       }
     }
   },
@@ -1849,11 +2010,19 @@
       "AdminSession": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "mf_admin_session"
+        "name": "mf_admin_session",
+        "description": "AUTH_MODE=cookie only (default). Encrypted HttpOnly SameSite=Lax cookie, Secure in production. A deployment accepts its configured mode, not both modes simultaneously."
       },
       "CatalogKey": {
         "type": "http",
-        "scheme": "bearer"
+        "scheme": "bearer",
+        "description": "Server-to-server CATALOG_SHARED_SECRET; not the admin accessToken or Frappe API token. Never embed in Pages/browser code."
+      },
+      "AdminBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque iron-session seal (not JWT)",
+        "description": "AUTH_MODE=bearer only. Encrypted 8-hour accessToken from login. Send in Authorization only; query tokens and cookie fallback are not accepted. Every protected request revalidates the upstream Frappe user. Writes additionally require allowed Origin and X-CSRF-Token."
       }
     },
     "schemas": {
@@ -1949,31 +2118,51 @@
         ],
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140,
+            "description": "Leading and trailing whitespace is trimmed before validation."
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140,
+            "description": "Leading and trailing whitespace is trimmed before validation."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 20000,
+            "default": ""
           },
           "group": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140,
+            "description": "Leading and trailing whitespace is trimmed before validation."
           },
           "uom": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140,
+            "description": "Leading and trailing whitespace is trimmed before validation."
           },
           "image": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 2048,
+            "pattern": "^(?:$|https://|/files/)",
+            "description": "HTTPS URL, public Frappe /files/ path, empty string, or null. Private file paths are not accepted.",
+            "default": null
           },
           "disabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           },
           "isStockItem": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": true
           }
         }
       },
@@ -1985,25 +2174,41 @@
         ],
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140,
+            "description": "Leading and trailing whitespace is trimmed before validation."
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140,
+            "description": "Leading and trailing whitespace is trimmed before validation."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 20000
           },
           "group": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140,
+            "description": "Leading and trailing whitespace is trimmed before validation."
           },
           "uom": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140,
+            "description": "Leading and trailing whitespace is trimmed before validation."
           },
           "image": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 2048,
+            "pattern": "^(?:$|https://|/files/)",
+            "description": "HTTPS URL, public Frappe /files/ path, empty string, or null. Private file paths are not accepted."
           },
           "disabled": {
             "type": "boolean"
@@ -2012,7 +2217,9 @@
             "type": "boolean"
           },
           "modified": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
           }
         }
       },
@@ -2050,10 +2257,13 @@
             ],
             "properties": {
               "page": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1
               },
               "pageSize": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
               },
               "hasMore": {
                 "type": "boolean"
@@ -2105,17 +2315,24 @@
                 ],
                 "properties": {
                   "page": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 1
                   },
                   "pageSize": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
                   },
                   "hasMore": {
                     "type": "boolean"
                   }
                 }
               }
-            }
+            },
+            "required": [
+              "source",
+              "variants"
+            ]
           }
         }
       },
@@ -2138,9 +2355,11 @@
               "csrfToken": {
                 "type": "string"
               }
-            }
+            },
+            "additionalProperties": false
           }
-        }
+        },
+        "additionalProperties": false
       },
       "Options": {
         "type": "object",
@@ -2163,9 +2382,17 @@
               "publicGroup": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "itemGroups",
+              "uoms",
+              "publicGroup"
+            ]
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "Problem": {
         "type": "object",
@@ -2193,7 +2420,411 @@
             "type": "integer"
           }
         }
+      },
+      "BearerLogin": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "user",
+              "csrfToken",
+              "accessToken"
+            ],
+            "properties": {
+              "user": {
+                "type": "string"
+              },
+              "csrfToken": {
+                "type": "string"
+              },
+              "accessToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "description": "Encrypted opaque token; upstream sid/CSRF are not readable plaintext. Expires after at most 8 hours; upstream expiration may occur earlier."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "description": "AUTH_MODE=bearer login response; session endpoint does not rotate or return accessToken."
+      },
+      "LoginResponse": {
+        "description": "Response depends on deployment AUTH_MODE; cookie mode also sets mf_admin_session.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/BearerLogin"
+          },
+          {
+            "$ref": "#/components/schemas/Session"
+          }
+        ]
+      },
+      "Apps": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "url",
+                "mode"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "mode": {
+                  "const": "native"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service",
+          "catalogConfigured"
+        ],
+        "properties": {
+          "status": {
+            "const": "ok"
+          },
+          "service": {
+            "const": "metaframer-admin"
+          },
+          "catalogConfigured": {
+            "type": "boolean",
+            "description": "Configuration presence only; does not prove upstream reachability or successful CRUD."
+          }
+        }
+      }
+    },
+    "headers": {
+      "RequestId": {
+        "description": "Request correlation identifier.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "NoStore": {
+        "schema": {
+          "type": "string",
+          "const": "no-store"
+        }
+      }
+    },
+    "responses": {
+      "Error401": {
+        "description": "Authentication required",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Error403": {
+        "description": "Origin, requested CORS method/header, CSRF or Frappe permission denied",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Error404": {
+        "description": "Not found",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Error409": {
+        "description": "Duplicate, stale update or linked record",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Error422": {
+        "description": "Invalid input",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Error429": {
+        "description": "Rate limited",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Error502": {
+        "description": "Upstream failure",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Error503": {
+        "description": "Missing configuration",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Error504": {
+        "description": "Upstream timeout",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "CorsPreflight": {
+        "description": "Allowed preflight",
+        "headers": {
+          "Access-Control-Allow-Origin": {
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact requesting allowlisted Origin."
+          },
+          "Access-Control-Allow-Methods": {
+            "schema": {
+              "type": "string",
+              "const": "GET, POST, PATCH, DELETE, OPTIONS"
+            }
+          },
+          "Access-Control-Allow-Headers": {
+            "schema": {
+              "type": "string",
+              "const": "Content-Type, Authorization, X-CSRF-Token"
+            }
+          },
+          "Access-Control-Max-Age": {
+            "schema": {
+              "type": "string",
+              "const": "600"
+            }
+          }
+        }
+      },
+      "Error400": {
+        "description": "Malformed JSON request body",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Error500": {
+        "description": "Unexpected server error",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "CorsOrigin": {
+        "name": "Origin",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "Exact configured Origin; no wildcard or suffix matching."
+      },
+      "CorsMethod": {
+        "name": "Access-Control-Request-Method",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PATCH",
+            "DELETE",
+            "OPTIONS"
+          ]
+        }
+      },
+      "CorsHeaders": {
+        "name": "Access-Control-Request-Headers",
+        "in": "header",
+        "schema": {
+          "type": "string"
+        },
+        "description": "Optional comma-separated subset of Content-Type, Authorization, X-CSRF-Token (case-insensitive)."
       }
     }
-  }
+  },
+  "x-frontend-urls": {
+    "admin": "https://metafrappe.github.io/metaframer-admin/",
+    "storefront": "https://metafrappe.github.io/metaframer-storefront/"
+  },
+  "x-cors": {
+    "origins": "Exact APP_ORIGIN plus comma-separated ALLOWED_ORIGINS; no wildcard, paths, null or subdomain matching. Pages Origin is https://metafrappe.github.io.",
+    "methods": [
+      "GET",
+      "POST",
+      "PATCH",
+      "DELETE",
+      "OPTIONS"
+    ],
+    "headers": [
+      "Content-Type",
+      "Authorization",
+      "X-CSRF-Token"
+    ],
+    "exposeHeaders": [
+      "X-Request-ID"
+    ],
+    "maxAge": 600,
+    "credentials": "Only cookie mode sets Access-Control-Allow-Credentials=true. Bearer/browser calls use credentials: omit."
+  },
+  "x-api-only": "API_ONLY=1 serves no static UI or SPA fallback; non-API paths return 404. GitHub Pages hosts both frontends."
 }
