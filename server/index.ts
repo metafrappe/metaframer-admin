@@ -8,6 +8,7 @@ const production = process.env.NODE_ENV === "production";
 const port = Number(process.env.PORT || 4300);
 const origin = process.env.APP_ORIGIN || `http://localhost:${port}`;
 const app = createApp({
+  trustedProxyIps: process.env.TRUSTED_PROXY_IPS,
   frappeUrl: process.env.FRAPPE_URL || "https://erp-test.metaframer.net",
   origin,
   sessionSecret: process.env.SESSION_SECRET || "",

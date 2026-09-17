@@ -88,4 +88,4 @@ NODE_ENV=production HOST=0.0.0.0 npm start
 
 HTTPS reverse proxy arkasında çalıştırın; `APP_ORIGIN=https://admin.example.com`. `SESSION_SECRET` ve servis sırları dağıtım ortamında tanımlanır. Dockerfile dahildir. Container'a `.env` kopyalanmaz. Production'da `Secure` cookie açıktır; düz HTTP üzerinden giriş çerezi taşınmaz. Vitrin → admin bağlantısını özel ağ üzerinden veya HTTPS ile kurun. Bu repo oluşturulması otomatik canlı sunucu dağıtımı anlamına gelmez.
 
-[Plan](docs/PLAN.md) · [API açıklaması](docs/API.md) · [Kurulu uygulamalar](docs/APPS.md)
+[Plan](docs/PLAN.md) · [API açıklaması](docs/API.md) · [Kurulu uygulamalar](docs/APPS.md) · [Uzak test yayını](docs/DEPLOYMENT.md)

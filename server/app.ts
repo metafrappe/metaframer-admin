@@ -4,6 +4,7 @@ import express, {
   type NextFunction,
 } from "express";
 import helmet from "helmet";
+import { parseTrustedProxyIps } from "./trusted-proxy.ts";
 import { rateLimit } from "express-rate-limit";
 import { getIronSession } from "iron-session";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -19,6 +20,7 @@ export interface Config {
   catalogToken?: string;
   publicGroup: string;
   production: boolean;
+  trustedProxyIps?: string;
   enableLocalSetup?: boolean;
   storefrontUrl?: string;
 }
@@ -80,6 +82,7 @@ export function createApp(
   if (config.sessionSecret.length < 32)
     throw new Error("SESSION_SECRET must have at least 32 characters.");
   const app = express();
+  app.set("trust proxy", parseTrustedProxyIps(config.trustedProxyIps));
   app.disable("x-powered-by");
   app.use(
     helmet({

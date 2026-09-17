@@ -13,7 +13,10 @@ import { randomUUID } from "node:crypto";
 import { ApiError, Frappe, type Credentials } from "../server/frappe.ts";
 
 const base = process.env.FRAPPE_URL || "https://erp-test.metaframer.net";
-const groupPreference = process.env.PUBLIC_CATALOG_GROUP || "Headless Demo";
+const groupPreference =
+  process.env.CATALOG_ITEM_GROUP ||
+  process.env.PUBLIC_CATALOG_GROUP ||
+  "Metaframer Demo";
 
 function log(step: string) {
   console.log(`[LIVE Frappe adapter] ${step}`);

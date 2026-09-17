@@ -1,0 +1,54 @@
+# TEMPLATE ONLY. Replace certificate paths after verifying both DNS names and
+# certificate SANs. Install separately from Press-generated configurations.
+server {
+    listen 80;
+    server_name admin-test.metaframer.net catalog-test.metaframer.net;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name admin-test.metaframer.net;
+    ssl_certificate __VERIFIED_FULLCHAIN_PATH__;
+    ssl_certificate_key __VERIFIED_PRIVATE_KEY_PATH__;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 128k;
+    location / {
+        proxy_pass http://127.0.0.1:4300;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        # Replace client-supplied forwarding headers at this single public edge.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Forwarded "";
+        proxy_set_header Connection "";
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 90s;
+        proxy_send_timeout 90s;
+        proxy_cache off;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name catalog-test.metaframer.net;
+    ssl_certificate __VERIFIED_FULLCHAIN_PATH__;
+    ssl_certificate_key __VERIFIED_PRIVATE_KEY_PATH__;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 128k;
+    location / {
+        proxy_pass http://127.0.0.1:4301;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Forwarded "";
+        proxy_set_header Connection "";
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 90s;
+        proxy_send_timeout 90s;
+        proxy_cache off;
+    }
+}
