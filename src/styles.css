@@ -420,6 +420,11 @@ img {
   background: #fff;
   border-bottom: 1px solid var(--line);
 }
+.topbar-links {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
 .breadcrumbs {
   display: flex;
   align-items: center;
@@ -1555,6 +1560,28 @@ tbody tr:hover {
 .login-form-wrap {
   width: 100%;
   max-width: 355px;
+}
+.logout-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid #e7d5a5;
+  border-radius: 8px;
+  background: #fff8e7;
+  color: #785d24;
+  font-size: 12px;
+  line-height: 1.75;
+}
+.logout-notice .icon-button {
+  flex-shrink: 0;
+  width: 25px;
+  height: 25px;
+}
+.login-error-state {
+  max-width: 540px;
+  padding: 20px;
 }
 .login-form-wrap > h2 {
   font-size: 26px;

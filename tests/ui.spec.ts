@@ -34,7 +34,13 @@ const variant: Product = {
   attributes: [{ name: "Renk", value: "Yeşil" }],
 };
 
-async function interceptAdmin(page: Page, { signedIn = true } = {}) {
+async function interceptAdmin(
+  page: Page,
+  {
+    signedIn = true,
+    accessToken,
+  }: { signedIn?: boolean; accessToken?: string } = {},
+) {
   let session = signedIn;
   let rejectWrite = false;
   let listError = 0;
@@ -80,7 +86,9 @@ async function interceptAdmin(page: Page, { signedIn = true } = {}) {
       if (rejectLogin)
         return problem(401, "Kullanıcı adı veya şifre geçersiz.");
       session = true;
-      return route.fulfill({ json: { data: user } });
+      return route.fulfill({
+        json: { data: { ...user, ...(accessToken ? { accessToken } : {}) } },
+      });
     }
     if (!session) return problem(401, "Oturumunuz sona erdi.");
     if (path === "/api/v1/auth/logout") {
@@ -290,6 +298,134 @@ test("real login request shape, invalid login feedback, and no password persiste
   await expect(
     page.getByRole("heading", { name: "Hesabınıza giriş yapın" }),
   ).toBeVisible();
+});
+
+test("opaque app session persists only in the tab and is cleared by 401 and logout", async ({
+  page,
+}) => {
+  const token = "ui-only-opaque-app-session";
+  const fixture = await interceptAdmin(page, {
+    signedIn: false,
+    accessToken: token,
+  });
+  await page.goto("/login");
+  const login = async () => {
+    await page
+      .getByLabel("E-posta veya kullanıcı adı")
+      .fill("ui-test@example.invalid");
+    await page
+      .getByLabel("Şifre", { exact: true })
+      .fill("UI-only-test-password");
+    const request = page.waitForRequest(
+      (request) => new URL(request.url()).pathname === "/api/v1/products",
+    );
+    await page.getByRole("button", { name: "Giriş yap", exact: true }).click();
+    expect((await request).headers().authorization).toBe(`Bearer ${token}`);
+    await expect(
+      page.getByRole("heading", { name: "Ürünler", exact: true }),
+    ).toBeVisible();
+  };
+  await login();
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("mf_admin_access_token")),
+  ).toBe(token);
+  expect(
+    await page.evaluate(() => localStorage.getItem("mf_admin_access_token")),
+  ).toBeNull();
+  const sessionRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === "/api/v1/auth/session",
+  );
+  await page.reload();
+  expect((await sessionRequest).headers().authorization).toBe(
+    `Bearer ${token}`,
+  );
+  await expect(
+    page.getByRole("heading", { name: "Ürünler", exact: true }),
+  ).toBeVisible();
+  fixture.expire();
+  await page.getByRole("button", { name: "Ürünleri yenile" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Hesabınıza giriş yapın" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("mf_admin_access_token")),
+  ).toBeNull();
+  await login();
+  const logoutRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === "/api/v1/auth/logout",
+  );
+  await page.getByRole("button", { name: "Çıkış yap" }).click();
+  const request = await logoutRequest;
+  expect(request.headers().authorization).toBe(`Bearer ${token}`);
+  expect(request.headers()["x-csrf-token"]).toBe("controlled-ui-csrf-token");
+  await expect(
+    page.getByRole("heading", { name: "Hesabınıza giriş yapın" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("mf_admin_access_token")),
+  ).toBeNull();
+  await expect(page.locator(".logout-notice")).toHaveCount(0);
+});
+
+test("failed upstream bearer logout clears this tab and keeps an honest notice after reload", async ({
+  page,
+}) => {
+  const token = "ui-only-logout-failure-token";
+  const fixture = await interceptAdmin(page, {
+    signedIn: false,
+    accessToken: token,
+  });
+  await page.route("**/api/v1/auth/logout", (route) =>
+    route.fulfill({
+      status: 502,
+      json: { detail: "Kontrollü sunucu bağlantı hatası." },
+    }),
+  );
+  const login = async () => {
+    await page
+      .getByLabel("E-posta veya kullanıcı adı")
+      .fill("ui-test@example.invalid");
+    await page
+      .getByLabel("Şifre", { exact: true })
+      .fill("UI-only-test-password");
+    await page.getByRole("button", { name: "Giriş yap", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Ürünler", exact: true }),
+    ).toBeVisible();
+  };
+  const warning =
+    "Bu sekmeden çıkıldı; sunucu oturumu kapatılamadı. Oturum süresi dolana kadar başka kopyalar geçerli kalabilir.";
+  await page.goto("/login");
+  await login();
+  await page.getByRole("button", { name: "Çıkış yap" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Hesabınıza giriş yapın" }),
+  ).toBeVisible();
+  await expect(page.getByText(warning, { exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("mf_admin_access_token")),
+  ).toBeNull();
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("mf_admin_logout_notice")),
+  ).toBe("1");
+  // The following unauthenticated session request represents this tab after its
+  // bearer is discarded, not revocation of other copies of the upstream token.
+  fixture.expire();
+  await page.reload();
+  await expect(page.getByText(warning, { exact: true })).toBeVisible();
+  await login();
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("mf_admin_logout_notice")),
+  ).toBeNull();
+  await page.getByRole("button", { name: "Çıkış yap" }).click();
+  await expect(page.getByText(warning, { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Çıkış bilgilendirmesini kapat" })
+    .click();
+  await expect(page.getByText(warning, { exact: true })).toHaveCount(0);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("mf_admin_logout_notice")),
+  ).toBeNull();
 });
 
 test("create, read, modify and delete follow accepted responses and carry CSRF/version", async ({

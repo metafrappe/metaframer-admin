@@ -49,6 +49,18 @@ function LoginPage() {
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const logoutNotice = auth.logoutNotice && (
+    <div className="logout-notice" role="status">
+      <span>{auth.logoutNotice}</span>
+      <button
+        className="icon-button"
+        aria-label="Çıkış bilgilendirmesini kapat"
+        onClick={auth.clearLogoutNotice}
+      >
+        <X size={17} />
+      </button>
+    </div>
+  );
   if (auth.loading)
     return (
       <div className="full-state">
@@ -58,7 +70,10 @@ function LoginPage() {
   if (auth.error)
     return (
       <div className="full-state">
-        <ErrorPanel message={auth.error} retry={auth.retry} />
+        <div className="login-error-state">
+          {logoutNotice}
+          <ErrorPanel message={auth.error} retry={auth.retry} />
+        </div>
       </div>
     );
   if (auth.session) return <Navigate to="/products" replace />;
@@ -121,6 +136,7 @@ function LoginPage() {
           <p className="muted-text">
             ERPNext kullanıcı bilgilerinizle devam edin.
           </p>
+          {logoutNotice}
           <form onSubmit={submit} className="login-form">
             <div className="field">
               <label htmlFor="username">E-posta veya kullanıcı adı</label>
@@ -367,16 +383,31 @@ function Workspace() {
             <ChevronRight size={14} className="breadcrumb-workspace" />
             <span>{section}</span>
           </div>
-          <a
-            href="https://erp-test.metaframer.net/desk"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="backend-link"
-          >
-            ERPNext’i aç
-            <ArrowUpRight size={16} />
-            <span className="sr-only"> (yeni sekmede)</span>
-          </a>
+          <div className="topbar-links">
+            <a
+              href={
+                import.meta.env.VITE_STOREFRONT_URL ||
+                "https://metafrappe.github.io/metaframer-storefront/"
+              }
+              target="_blank"
+              rel="noopener noreferrer"
+              className="backend-link"
+            >
+              Vitrini aç
+              <ArrowUpRight size={16} />
+              <span className="sr-only"> (yeni sekmede)</span>
+            </a>
+            <a
+              href="https://erp-test.metaframer.net/desk"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="backend-link"
+            >
+              ERPNext’i aç
+              <ArrowUpRight size={16} />
+              <span className="sr-only"> (yeni sekmede)</span>
+            </a>
+          </div>
         </header>
         <main id="main" className="main-content">
           {logoutError && <ErrorPanel compact message={logoutError} />}

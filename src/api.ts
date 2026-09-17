@@ -1,5 +1,33 @@
 import type { ApiProblem } from "../shared/contracts";
 
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(
+  /\/+$/,
+  "",
+);
+export const usesRemoteApi =
+  Boolean(apiBaseUrl) &&
+  new URL(apiBaseUrl, window.location.origin).origin !== window.location.origin;
+const accessTokenKey = "mf_admin_access_token";
+function readAccessToken() {
+  try {
+    return sessionStorage.getItem(accessTokenKey) || "";
+  } catch {
+    return "";
+  }
+}
+let accessToken = readAccessToken();
+export function hasAccessToken() {
+  return Boolean(accessToken);
+}
+export function setAccessToken(value: string | null) {
+  accessToken = value || "";
+  try {
+    if (accessToken) sessionStorage.setItem(accessTokenKey, accessToken);
+    else sessionStorage.removeItem(accessTokenKey);
+  } catch {
+    /* A blocked browser store still permits an in-memory session. */
+  }
+}
 let csrfToken = "";
 export function setCsrfToken(value: string) {
   csrfToken = value;
@@ -20,16 +48,17 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method || "GET").toUpperCase();
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
   if (init.body) headers.set("Content-Type", "application/json");
   if (!["GET", "HEAD"].includes(method) && csrfToken)
     headers.set("X-CSRF-Token", csrfToken);
   let response: Response;
   try {
-    response = await fetch(`/api/v1${path}`, {
+    response = await fetch(`${apiBaseUrl}/api/v1${path}`, {
       ...init,
       method,
       headers,
-      credentials: "include",
+      credentials: usesRemoteApi ? "omit" : "include",
       cache: "no-store",
     });
   } catch (error) {
@@ -43,8 +72,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const problem = (await response
       .json()
       .catch(() => ({}))) as Partial<ApiProblem>;
-    if (response.status === 401 && !path.startsWith("/auth/"))
+    if (response.status === 401) {
+      setAccessToken(null);
+      setCsrfToken("");
       window.dispatchEvent(new Event("session-expired"));
+    }
     const fallback =
       response.status === 401
         ? "Oturumunuz sona erdi. Lütfen yeniden giriş yapın."

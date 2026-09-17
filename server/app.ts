@@ -5,8 +5,9 @@ import express, {
 } from "express";
 import helmet from "helmet";
 import { parseTrustedProxyIps } from "./trusted-proxy.ts";
+import { parseAllowedOrigins } from "./allowed-origins.ts";
 import { rateLimit } from "express-rate-limit";
-import { getIronSession } from "iron-session";
+import { getIronSession, sealData, unsealData } from "iron-session";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { z, ZodError } from "zod";
 import { ApiError, Frappe, type Credentials } from "./frappe.ts";
@@ -15,6 +16,8 @@ import type { ProductInput } from "../shared/contracts.ts";
 export interface Config {
   frappeUrl: string;
   origin: string;
+  allowedOrigins?: string;
+  authMode?: "cookie" | "bearer";
   sessionSecret: string;
   catalogSecret?: string;
   catalogToken?: string;
@@ -30,6 +33,14 @@ interface SessionData {
   user?: string;
   localCsrf?: string;
 }
+interface BearerSession extends SessionData {
+  purpose: "metaframer-admin-bearer-v1";
+  audience: string;
+  expiresAt: number;
+}
+const SESSION_TTL_SECONDS = 8 * 3600;
+const CORS_METHODS = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"];
+const CORS_HEADERS = ["content-type", "authorization", "x-csrf-token"];
 const querySchema = z
   .object({
     q: z.string().trim().max(100).default(""),
@@ -81,6 +92,9 @@ export function createApp(
 ) {
   if (config.sessionSecret.length < 32)
     throw new Error("SESSION_SECRET must have at least 32 characters.");
+  const authMode = config.authMode || "cookie";
+  if (!["cookie", "bearer"].includes(authMode)) throw new Error("AUTH_MODE must be cookie or bearer.");
+  const allowedOrigins = parseAllowedOrigins(config.origin, config.allowedOrigins);
   const app = express();
   app.set("trust proxy", parseTrustedProxyIps(config.trustedProxyIps));
   app.disable("x-powered-by");
@@ -111,6 +125,33 @@ export function createApp(
       res.setHeader("Cache-Control", "no-store");
     next();
   });
+  app.use("/api/", (req, res, next) => {
+    res.vary("Origin");
+    const origin = req.get("Origin");
+    if (origin && !allowedOrigins.has(origin)) {
+      return next(new ApiError(403, "ORIGIN_DENIED", "İstek kaynağı doğrulanamadı. Sayfayı yenileyin."));
+    }
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Expose-Headers", "X-Request-ID");
+      if (authMode === "cookie") res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
+    if (req.method === "OPTIONS") {
+      if (!origin) return next(new ApiError(403, "ORIGIN_DENIED", "Ön kontrol için izin verilen bir kaynak gerekli."));
+      const requestedMethod = req.get("Access-Control-Request-Method") || "";
+      const requestedHeaders = (req.get("Access-Control-Request-Headers") || "").split(",").map(header => header.trim().toLowerCase()).filter(Boolean);
+      if (!CORS_METHODS.includes(requestedMethod) || requestedHeaders.some(header => !CORS_HEADERS.includes(header))) {
+        return next(new ApiError(403, "CORS_REQUEST_DENIED", "İstenen yöntem veya başlıklara izin verilmiyor."));
+      }
+      res.vary("Access-Control-Request-Method");
+      res.vary("Access-Control-Request-Headers");
+      res.setHeader("Access-Control-Allow-Methods", CORS_METHODS.join(", "));
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token");
+      res.setHeader("Access-Control-Max-Age", "600");
+      return res.status(204).end();
+    }
+    next();
+  });
   app.use(express.json({ limit: "128kb" }));
   app.use(
     "/api/",
@@ -133,7 +174,7 @@ export function createApp(
     getIronSession<SessionData>(req, res, {
       cookieName: "mf_admin_session",
       password: config.sessionSecret,
-      ttl: 8 * 3600,
+      ttl: SESSION_TTL_SECONDS,
       cookieOptions: {
         httpOnly: true,
         sameSite: "lax",
@@ -142,19 +183,39 @@ export function createApp(
       },
     });
   const requireOrigin = (req: Request) => {
-    if (req.get("Origin") !== config.origin)
+    if (!allowedOrigins.has(req.get("Origin") || ""))
       throw new ApiError(
         403,
         "ORIGIN_DENIED",
         "İstek kaynağı doğrulanamadı. Sayfayı yenileyin.",
       );
   };
+  async function sessionState(req: Request, res: Response): Promise<{ data: SessionData; destroy: () => void }> {
+    if (res.locals.sessionState) return res.locals.sessionState;
+    if (authMode === "cookie") {
+      const current = await session(req, res);
+      return res.locals.sessionState = { data: current, destroy: () => current.destroy() };
+    }
+    const header = req.get("Authorization") || "";
+    const token = header.match(/^Bearer ([^\s]+)$/i)?.[1];
+    let current: Partial<BearerSession> = {};
+    if (token && token.length <= 4096) {
+      try { current = await unsealData<Partial<BearerSession>>(token, { password: config.sessionSecret, ttl: SESSION_TTL_SECONDS }); }
+      catch { current = {}; }
+    }
+    const valid = current.purpose === "metaframer-admin-bearer-v1"
+      && current.audience === config.origin
+      && typeof current.expiresAt === "number" && current.expiresAt > Date.now()
+      && [current.sid, current.csrf, current.user, current.localCsrf].every(value => typeof value === "string" && value.length > 0);
+    return res.locals.sessionState = { data: valid ? current : {}, destroy: () => {} };
+  }
   async function auth(
     req: Request,
     res: Response,
     mutate = false,
   ): Promise<Credentials> {
-    const current = await session(req, res);
+    const state = await sessionState(req, res);
+    const current = state.data;
     if (!current.sid || !current.csrf || !current.user)
       throw new ApiError(401, "AUTHENTICATION_REQUIRED", "Lütfen giriş yapın.");
     if (mutate) {
@@ -171,10 +232,11 @@ export function createApp(
     }
     const credentials = { sid: current.sid, csrf: current.csrf };
     try {
-      await frappe.user(credentials);
+      const user = await frappe.user(credentials);
+      if (user !== current.user) throw new ApiError(401, "SESSION_EXPIRED", "Oturum kullanıcısı doğrulanamadı.");
     } catch (err) {
       if (err instanceof ApiError && [401, 403].includes(err.status)) {
-        current.destroy();
+        state.destroy();
         throw new ApiError(
           401,
           "SESSION_EXPIRED",
@@ -189,7 +251,7 @@ export function createApp(
     res.json({
       status: "ok",
       service: "metaframer-admin",
-      catalogConfigured: Boolean(config.catalogToken && config.catalogSecret),
+      catalogConfigured: Boolean(config.catalogToken && config.publicGroup),
     }),
   );
   app.post(
@@ -212,23 +274,29 @@ export function createApp(
       requireOrigin(req);
       const { username, password } = loginSchema.parse(req.body);
       const login = await frappe.login(username, password);
+      const localCsrf = randomBytes(32).toString("hex");
+      if (authMode === "bearer") {
+        const data: BearerSession = { sid: login.sid, csrf: login.csrf, user: login.user, localCsrf, purpose: "metaframer-admin-bearer-v1", audience: config.origin, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 };
+        const accessToken = await sealData(data, { password: config.sessionSecret, ttl: SESSION_TTL_SECONDS });
+        return res.json({ data: { user: login.user, csrfToken: localCsrf, accessToken } });
+      }
       const current = await session(req, res);
       current.sid = login.sid;
       current.csrf = login.csrf;
       current.user = login.user;
-      current.localCsrf = randomBytes(32).toString("hex");
+      current.localCsrf = localCsrf;
       await current.save();
       res.json({ data: { user: login.user, csrfToken: current.localCsrf } });
     },
   );
   app.get("/api/v1/auth/session", async (req, res) => {
     await auth(req, res);
-    const current = await session(req, res);
+    const current = (await sessionState(req, res)).data;
     res.json({ data: { user: current.user, csrfToken: current.localCsrf } });
   });
   app.post("/api/v1/auth/logout", async (req, res) => {
     const credentials = await auth(req, res, true);
-    const current = await session(req, res);
+    const current = await sessionState(req, res);
     try {
       await frappe.request("/api/method/logout", credentials, {
         method: "POST",
@@ -346,6 +414,23 @@ export function createApp(
       );
     return { token: config.catalogToken };
   }
+  function publicCatalogCredentials(): Credentials {
+    if (!config.catalogToken || !config.publicGroup) throw new ApiError(503, "CATALOG_NOT_CONFIGURED", "Katalog bağlantısı henüz yapılandırılmadı.");
+    return { token: config.catalogToken };
+  }
+  const publicQuerySchema = querySchema.extend({ status: z.literal("active").default("active") });
+  app.get("/api/v1/public/products", async (req, res) => {
+    const credentials = publicCatalogCredentials();
+    const query = publicQuerySchema.parse(req.query);
+    if (query.group && query.group !== config.publicGroup) return res.json({ data: [], meta: { page: query.page, pageSize: query.pageSize, hasMore: false, source: "frappe" } });
+    res.json(await frappe.list(credentials, query, config.publicGroup));
+  });
+  app.get("/api/v1/public/products/:id/variants", async (req, res) => {
+    res.json(await frappe.variants(z.string().max(140).parse(req.params.id), publicCatalogCredentials(), publicQuerySchema.parse(req.query), config.publicGroup));
+  });
+  app.get("/api/v1/public/products/:id", async (req, res) => {
+    res.json(await frappe.detail(z.string().max(140).parse(req.params.id), publicCatalogCredentials(), config.publicGroup));
+  });
   app.get("/api/v1/catalog/products", async (req, res) => {
     const credentials = catalogAuth(req);
     const query = querySchema.parse(req.query);
@@ -444,7 +529,9 @@ export function createApp(
         const response = await fetch(new URL(path, config.origin), {
           method,
           headers: {
-            Cookie: adminCookie,
+            ...(authMode === "bearer"
+              ? { Authorization: req.get("Authorization") || "" }
+              : { Cookie: adminCookie }),
             Origin: config.origin,
             "X-CSRF-Token": req.get("X-CSRF-Token") || "",
             "Content-Type": "application/json",

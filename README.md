@@ -4,7 +4,7 @@ ERPNext v16 ürün yönetimi ve iki headless uygulamanın ortak API katmanı. Ve
 
 ## Kapsam
 
-- Frappe kullanıcı adı/parolasıyla gerçek giriş; şifreli HttpOnly oturum.
+- Frappe kullanıcı adı/parolasıyla gerçek giriş; yerelde şifreli HttpOnly oturum, GitHub Pages yayınında kısa ömürlü şifreli bearer oturumu.
 - Ürün listesi, arama, grup/durum filtreleri, sayfalama.
 - Ürün oluşturma, güncelleme, silme; Frappe yetkileri ve `modified` çakışma kontrolü.
 - Ürün detayı ve sayfalı varyantlar. Varyant şablonları bu arayüzden silinmez.
@@ -15,13 +15,16 @@ ERPNext v16 ürün yönetimi ve iki headless uygulamanın ortak API katmanı. Ve
 ## İki repo nasıl bağlı?
 
 ```text
-Vitrin tarayıcısı → metaframer-storefront sunucusu
-                 → bu reponun /api/v1/catalog/* uçları
-                 → salt okunur Frappe hesabı → ERPNext Item
-
-Yönetim tarayıcısı → bu reponun /api/v1/products uçları
-                  → giriş yapan kişinin Frappe oturumu → ERPNext Item
+GitHub Pages yönetim → HTTPS API → giriş yapan kişinin Frappe oturumu → ERPNext Item
+GitHub Pages vitrin → HTTPS API /public/products → salt okunur katalog hesabı → ERPNext Item
 ```
+
+- Yönetim: https://metafrappe.github.io/metaframer-admin/
+- Vitrin: https://metafrappe.github.io/metaframer-storefront/
+- API: https://headless-api.metaframer.net/api/v1
+
+Pages yalnız arayüz dosyalarını sunar. API ayrı çalışır; Frappe API anahtarları frontend'e girmez. Yönetim oturum token'ı sekmenin `sessionStorage` alanında tutulur; Frappe parolası kaydedilmez. Public repo kaynak kodunun açık olması anlamına gelir, yönetim CRUD uçları giriş gerektirir.
+
 
 Vitrin: [metafrappe/metaframer-storefront](https://github.com/metafrappe/metaframer-storefront).
 API sözleşmesinin asıl kaynağı [docs/openapi.json](docs/openapi.json); TS DTO'ları [shared/contracts.ts](shared/contracts.ts). Vitrindeki kopya aynı API sürümünü kullanır.
@@ -79,13 +82,8 @@ npm run test:e2e
 
 `tests/*.test.ts` gerçek localhost HTTP sunucularında kontrollü upstream yanıtları kullanır. `tests/ui.spec.ts` arayüz sözleşmesini test eder; canlı Frappe testi değildir. Gerçek CRUD kanıtı ayrıca `/setup` veya canlı smoke çalıştırılarak üretilir. [Doğrulama durumu](docs/VERIFICATION.md).
 
-## Production
+## Production / GitHub Pages
 
-```sh
-npm run build
-NODE_ENV=production HOST=0.0.0.0 npm start
-```
-
-HTTPS reverse proxy arkasında çalıştırın; `APP_ORIGIN=https://admin.example.com`. `SESSION_SECRET` ve servis sırları dağıtım ortamında tanımlanır. Dockerfile dahildir. Container'a `.env` kopyalanmaz. Production'da `Secure` cookie açıktır; düz HTTP üzerinden giriş çerezi taşınmaz. Vitrin → admin bağlantısını özel ağ üzerinden veya HTTPS ile kurun. Bu repo oluşturulması otomatik canlı sunucu dağıtımı anlamına gelmez.
+`.github/workflows/pages.yml` test ve build sonrasında `dist/client` klasörünü GitHub Pages'a yayımlar. Proje alt dizini ve hash tabanlı yönlendirme desteklenir. API için `deploy/api.compose.yml` kullanılır; `AUTH_MODE=bearer`, `API_ONLY=1` ve kesin `ALLOWED_ORIGINS` ayarlanır. Kurulum adımları [yayın belgesindedir](docs/DEPLOYMENT.md).
 
 [Plan](docs/PLAN.md) · [API açıklaması](docs/API.md) · [Kurulu uygulamalar](docs/APPS.md) · [Uzak test yayını](docs/DEPLOYMENT.md)

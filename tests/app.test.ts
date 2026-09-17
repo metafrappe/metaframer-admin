@@ -2,10 +2,14 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import type { AddressInfo } from 'node:net';
+import { sealData } from 'iron-session';
 import { createApp, type Config } from '../server/app.ts';
+import { parseAllowedOrigins } from '../server/allowed-origins.ts';
 import { ApiError, type Frappe } from '../server/frappe.ts';
 
 const ORIGIN = 'http://admin.local.test';
+const PAGES_ORIGIN = 'https://metafrappe.github.io';
+const SESSION_SECRET = 'a-test-only-session-secret-over-32-characters';
 const UPSTREAM_SID = 'upstream-session-must-stay-private';
 const UPSTREAM_CSRF = 'upstream-csrf-must-stay-private';
 const CATALOG_SECRET = 'server-to-server-catalog-secret-test-only';
@@ -34,7 +38,7 @@ async function harness(t: TestContext, behavior: Behavior = {}, overrides: Parti
   };
   const stub: Record<string, unknown> = { base: 'https://erp-test.metaframer.net' };
   for (const [method, implementation] of Object.entries(values)) stub[method] = async (...args: any[]) => { calls.push({ method, args }); return implementation(...args); };
-  const config: Config = { frappeUrl: 'https://erp-test.metaframer.net', origin: ORIGIN, sessionSecret: 'a-test-only-session-secret-over-32-characters', catalogSecret: CATALOG_SECRET, catalogToken: CATALOG_TOKEN, publicGroup: 'Headless Demo', production: false, ...overrides };
+  const config: Config = { frappeUrl: 'https://erp-test.metaframer.net', origin: ORIGIN, sessionSecret: SESSION_SECRET, catalogSecret: CATALOG_SECRET, catalogToken: CATALOG_TOKEN, publicGroup: 'Headless Demo', production: false, ...overrides };
   const app = createApp(config, stub as unknown as Frappe);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
@@ -308,4 +312,215 @@ test('local setup with a login still rejects missing CSRF before upstream work',
     assert.equal((await response.json()).title, 'CSRF_DENIED');
   }
   assert.deepEqual(calls.map(value => value.method), ['login'], 'No permission, provisioning, seed or verification request may run.');
+});
+
+async function bearerLogin(request: Awaited<ReturnType<typeof harness>>['request']) {
+  const response = await request('/api/v1/auth/login', {
+    method: 'POST', headers: { Origin: PAGES_ORIGIN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'demo@example.invalid', password: 'test-only-password' }),
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  return { response, body, token: body.data.accessToken as string, csrf: body.data.csrfToken as string };
+}
+function bearerHeaders(token: string, csrf?: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}`, Origin: PAGES_ORIGIN, ...(csrf ? { 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' } : {}) };
+}
+const BEARER_CONFIG: Partial<Config> = { authMode: 'bearer', allowedOrigins: PAGES_ORIGIN };
+
+test('CORS origin configuration accepts only complete exact HTTP origins', () => {
+  assert.deepEqual([...parseAllowedOrigins(ORIGIN, `${PAGES_ORIGIN}, ${ORIGIN}`)], [ORIGIN, PAGES_ORIGIN]);
+  for (const value of ['*', 'null', 'https://*.github.io', `${PAGES_ORIGIN}/repo`, `${PAGES_ORIGIN}/`, 'https://user:pass@github.io', 'javascript:alert(1)']) {
+    assert.throws(() => parseAllowedOrigins(ORIGIN, value), /ALLOWED_ORIGINS/, value);
+  }
+});
+
+test('allowed Pages CORS preflight permits bounded bearer/CSRF headers without authenticating', async t => {
+  const { request, calls } = await harness(t, {}, BEARER_CONFIG);
+  const response = await request('/api/v1/products/TEST-1', { method: 'OPTIONS', headers: { Origin: PAGES_ORIGIN, 'Access-Control-Request-Method': 'PATCH', 'Access-Control-Request-Headers': 'Content-Type, Authorization, X-CSRF-Token' } });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get('Access-Control-Allow-Origin'), PAGES_ORIGIN);
+  assert.equal(response.headers.get('Access-Control-Allow-Credentials'), null);
+  assert.deepEqual(response.headers.get('Access-Control-Allow-Methods')?.split(', '), ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS']);
+  assert.equal(response.headers.get('Access-Control-Allow-Headers'), 'Content-Type, Authorization, X-CSRF-Token');
+  assert.match(response.headers.get('Vary')!, /Origin/);
+  assert.equal(calls.length, 0);
+});
+
+test('CORS denies lookalike origins, unlisted methods and headers before upstream work', async t => {
+  const { request, calls } = await harness(t, {}, BEARER_CONFIG);
+  for (const origin of ['https://attacker.github.io', 'https://metafrappe.github.io.attacker.invalid', 'null']) {
+    const response = await request('/api/v1/public/products', { headers: { Origin: origin } });
+    assert.equal(response.status, 403, origin);
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), null);
+  }
+  const deniedPreflights: HeadersInit[] = [
+    { Origin: PAGES_ORIGIN, 'Access-Control-Request-Method': 'PUT' },
+    { Origin: PAGES_ORIGIN, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'X-Frappe-CSRF-Token' },
+    { 'Access-Control-Request-Method': 'GET' },
+  ];
+  for (const headers of deniedPreflights) {
+    const response = await request('/api/v1/products', { method: 'OPTIONS', headers });
+    assert.equal(response.status, 403);
+    assert.equal(response.headers.get('Access-Control-Allow-Methods'), null);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('bearer login returns an opaque sealed token, no cookie or upstream credentials', async t => {
+  const { request, calls } = await harness(t, {}, BEARER_CONFIG);
+  const session = await bearerLogin(request);
+  assert.deepEqual(Object.keys(session.body.data).sort(), ['accessToken', 'csrfToken', 'user']);
+  assert.ok(session.token.length > 100);
+  assert.ok(session.csrf.length >= 32);
+  assert.notEqual(session.csrf, UPSTREAM_CSRF);
+  assert.equal(session.response.headers.get('Set-Cookie'), null);
+  assert.equal(session.response.headers.get('Access-Control-Allow-Origin'), PAGES_ORIGIN);
+  assert.equal(session.response.headers.get('Cache-Control'), 'no-store');
+  assert.doesNotMatch(JSON.stringify(session.body), new RegExp(`${UPSTREAM_SID}|${UPSTREAM_CSRF}|test-only-password|${CATALOG_TOKEN}`));
+  for (let count = 0; count < 2; count++) {
+    const response = await request('/api/v1/auth/session', { headers: bearerHeaders(session.token) });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).data, { user: 'demo@example.invalid', csrfToken: session.csrf });
+  }
+  assert.equal(calls.filter(call => call.method === 'user').length, 2, 'Every request must revalidate the upstream session');
+  assert.deepEqual(calls.filter(call => call.method === 'user')[0].args, [{ sid: UPSTREAM_SID, csrf: UPSTREAM_CSRF }]);
+});
+
+test('bearer authentication rejects tampered, expired, foreign-audience and query-string tokens', async t => {
+  const { request, calls } = await harness(t, {}, BEARER_CONFIG);
+  const session = await bearerLogin(request);
+  const validData = { sid: UPSTREAM_SID, csrf: UPSTREAM_CSRF, user: 'demo@example.invalid', localCsrf: session.csrf, purpose: 'metaframer-admin-bearer-v1', audience: ORIGIN, expiresAt: Date.now() + 60000 };
+  const forgedPayloads = [
+    { ...validData, expiresAt: Date.now() - 1 },
+    { ...validData, audience: 'https://other-app.invalid' },
+    { ...validData, purpose: 'cookie-session' },
+  ];
+  const invalidTokens = ['not-a-token', `${session.token.slice(0, 100)}!${session.token.slice(101)}`, ...await Promise.all(forgedPayloads.map(data => sealData(data, { password: SESSION_SECRET, ttl: 8 * 3600 })))];
+  for (const token of invalidTokens) {
+    const response = await request('/api/v1/products', { headers: bearerHeaders(token) });
+    assert.equal(response.status, 401);
+  }
+  const queryToken = await request(`/api/v1/products?access_token=${encodeURIComponent(session.token)}`, { headers: { Origin: PAGES_ORIGIN } });
+  assert.equal(queryToken.status, 401);
+  assert.equal(calls.filter(call => call.method === 'user' || call.method === 'list').length, 0);
+});
+
+test('bearer mode cannot use a cookie session as a fallback or promote its envelope', async t => {
+  const cookieApp = await harness(t);
+  const cookie = await cookieApp.login();
+  const bearerApp = await harness(t, {}, BEARER_CONFIG);
+  const attemptedCredentials: HeadersInit[] = [{ Cookie: cookie.cookie }, { Authorization: `Bearer ${cookie.cookie.slice('mf_admin_session='.length)}` }];
+  for (const headers of attemptedCredentials) {
+    const response = await bearerApp.request('/api/v1/products', { headers });
+    assert.equal(response.status, 401);
+  }
+  assert.equal(bearerApp.calls.length, 0);
+});
+
+test('bearer mutations need allowed Origin plus local CSRF and retain user permissions', async t => {
+  const { request, calls } = await harness(t, {}, BEARER_CONFIG);
+  const session = await bearerLogin(request);
+  for (const headers of [
+    { Authorization: `Bearer ${session.token}`, 'X-CSRF-Token': session.csrf, 'Content-Type': 'application/json' },
+    bearerHeaders(session.token),
+    bearerHeaders(session.token, UPSTREAM_CSRF),
+    { ...bearerHeaders(session.token, session.csrf), Origin: 'https://attacker.invalid' },
+  ]) {
+    const response = await request('/api/v1/products', { method: 'POST', headers, body: JSON.stringify(INPUT) });
+    assert.equal(response.status, 403);
+  }
+  assert.equal(calls.filter(call => call.method === 'save').length, 0);
+  const response = await request('/api/v1/products', { method: 'POST', headers: bearerHeaders(session.token, session.csrf), body: JSON.stringify(INPUT) });
+  assert.equal(response.status, 201);
+  assert.deepEqual(calls.find(call => call.method === 'save')?.args, [INPUT, { sid: UPSTREAM_SID, csrf: UPSTREAM_CSRF }]);
+});
+
+test('bearer Item permission errors stay 403 and cannot borrow catalog privileges', async t => {
+  const { request, calls } = await harness(t, { list: () => { throw new ApiError(403, 'PERMISSION_DENIED', 'Denied'); } }, BEARER_CONFIG);
+  const session = await bearerLogin(request);
+  const response = await request('/api/v1/products', { headers: bearerHeaders(session.token) });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).title, 'PERMISSION_DENIED');
+  assert.deepEqual(calls.find(call => call.method === 'list')?.args[0], { sid: UPSTREAM_SID, csrf: UPSTREAM_CSRF });
+});
+
+test('bearer identity mismatch and revoked upstream sessions stop access immediately', async t => {
+  for (const user of [() => 'another-user@example.invalid', () => { throw new ApiError(403, 'PERMISSION_DENIED', 'Revoked'); }]) {
+    const { request, calls } = await harness(t, { user }, BEARER_CONFIG);
+    const session = await bearerLogin(request);
+    const response = await request('/api/v1/products', { headers: bearerHeaders(session.token) });
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).title, 'SESSION_EXPIRED');
+    assert.equal(calls.filter(call => call.method === 'list').length, 0);
+  }
+});
+
+test('bearer logout invalidates Frappe and a replay cannot regain access', async t => {
+  let revoked = false;
+  const { request, calls } = await harness(t, {
+    user: () => { if (revoked) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Revoked'); return 'demo@example.invalid'; },
+    request: (path: string) => { assert.equal(path, '/api/method/logout'); revoked = true; return { data: {} }; },
+  }, BEARER_CONFIG);
+  const session = await bearerLogin(request);
+  const logout = await request('/api/v1/auth/logout', { method: 'POST', headers: bearerHeaders(session.token, session.csrf) });
+  assert.equal(logout.status, 204);
+  assert.deepEqual(calls.find(call => call.method === 'request')?.args, ['/api/method/logout', { sid: UPSTREAM_SID, csrf: UPSTREAM_CSRF }, { method: 'POST' }]);
+  const replay = await request('/api/v1/products', { headers: bearerHeaders(session.token) });
+  assert.equal(replay.status, 401);
+  assert.equal(calls.filter(call => call.method === 'list').length, 0);
+});
+
+test('anonymous browser catalog uses only the server read token and fixed public group', async t => {
+  const { request, calls } = await harness(t, {}, { ...BEARER_CONFIG, catalogSecret: undefined });
+  for (const path of ['/api/v1/public/products?pageSize=10', '/api/v1/public/products/TEST-1', '/api/v1/public/products/TEMPLATE/variants?page=2&pageSize=5']) {
+    const response = await request(path, { headers: { Origin: PAGES_ORIGIN } });
+    assert.equal(response.status, 200, path);
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), PAGES_ORIGIN);
+    assert.doesNotMatch(await response.text(), new RegExp(`${CATALOG_TOKEN}|${CATALOG_SECRET}|${UPSTREAM_SID}|${UPSTREAM_CSRF}`));
+  }
+  const list = calls.find(call => call.method === 'list')!;
+  assert.deepEqual(list.args, [{ token: CATALOG_TOKEN }, { q: '', group: '', status: 'active', page: 1, pageSize: 10, sort: '-modified' }, 'Headless Demo']);
+  assert.deepEqual(calls.find(call => call.method === 'detail')?.args, ['TEST-1', { token: CATALOG_TOKEN }, 'Headless Demo']);
+  assert.deepEqual(calls.find(call => call.method === 'variants')?.args, ['TEMPLATE', { token: CATALOG_TOKEN }, { q: '', group: '', status: 'active', page: 2, pageSize: 5, sort: '-modified' }, 'Headless Demo']);
+  assert.equal(calls.filter(call => call.method === 'user' || call.method === 'login').length, 0);
+});
+
+test('public catalog cannot request disabled/private inventory, arbitrary fields or unbounded pages', async t => {
+  const { request, calls } = await harness(t, {}, BEARER_CONFIG);
+  for (const path of ['/api/v1/public/products', '/api/v1/public/products/TEMPLATE/variants']) {
+    for (const query of ['status=disabled', 'status=all', 'fields=*', 'pageSize=51', 'page=10001', 'page=0']) {
+      const response = await request(`${path}?${query}`);
+      assert.equal(response.status, 422, `${path}?${query}`);
+    }
+  }
+  const privateList = await request('/api/v1/public/products?group=Private');
+  assert.equal(privateList.status, 200);
+  assert.deepEqual((await privateList.json()).data, []);
+  assert.equal(calls.length, 0);
+});
+
+test('public catalog preserves adapter visibility denial and exposes no mutation endpoints', async t => {
+  const { request, calls } = await harness(t, { detail: () => { throw new ApiError(404, 'NOT_FOUND', 'Hidden'); }, variants: () => { throw new ApiError(404, 'NOT_FOUND', 'Hidden'); } }, BEARER_CONFIG);
+  for (const path of ['/api/v1/public/products/PRIVATE', '/api/v1/public/products/PRIVATE/variants']) {
+    const response = await request(path);
+    assert.equal(response.status, 404);
+  }
+  for (const method of ['POST', 'PATCH', 'DELETE']) {
+    const response = await request('/api/v1/public/products/TEST-1', { method, headers: { Origin: PAGES_ORIGIN } });
+    assert.equal(response.status, 404);
+  }
+  assert.equal(calls.filter(call => call.method === 'save' || call.method === 'remove').length, 0);
+});
+
+test('public catalog fails clearly without service credentials and internal catalog remains guarded', async t => {
+  const missing = await harness(t, {}, { ...BEARER_CONFIG, catalogToken: undefined });
+  const response = await missing.request('/api/v1/public/products');
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).title, 'CATALOG_NOT_CONFIGURED');
+  assert.equal(missing.calls.length, 0);
+  const ready = await harness(t, {}, BEARER_CONFIG);
+  const denied = await ready.request('/api/v1/catalog/products', { headers: { Origin: PAGES_ORIGIN } });
+  assert.equal(denied.status, 401);
+  assert.equal(ready.calls.length, 0);
 });
